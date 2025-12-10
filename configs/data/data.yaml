@@ -1,2 +1,2 @@
 dataroot: "/kaggle/input/cassava-leaf-disease-classification"
-output_dir: "/kaggle/working"
+output_dir: "/kaggle/working/"

@@ -1,15 +1,11 @@
 # configs/config.yaml
 defaults:
+  - model: model1
   - train: train
   - data: data
   - _self_
 
-# Model configs (loaded dynamically in train_all_models_and_ensemble)
-model1_config: ${oc.load: configs/model/model1.yaml}
-model2_config: ${oc.load: configs/model/model2.yaml}
-model3_config: ${oc.load: configs/model/model3.yaml}
-
-model_name: "model1"
-debug: false
+# For full pipeline, we'll override model via CLI
+run_full: false  # ← keep false; we trigger via CLI
+debug: true      # ← keep true for fast test
 debug_samples: 100
-run_full: false

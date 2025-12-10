@@ -16,6 +16,7 @@ from cassava_classifier.data.datamodule import CassavaDataModule
 from cassava_classifier.models.model import CassavaLightningModule
 from cassava_classifier.utils.preprocessing import clean_labels
 from cassava_classifier.pipelines.convert import convert_to_onnx
+from cassava_classifier.pipelines.infer import ensemble_predict
 
 
 def train_fold(fold: int, train_df, val_df, model_config: DictConfig, cfg: DictConfig):
@@ -87,54 +88,29 @@ def train_model(cfg: DictConfig):
 
 
 def train_all_models_and_ensemble(cfg: DictConfig):
-    """
-    Train all three models and convert them to ONNX format for production.
-    """
     model_configs = {
         "model1": "configs/model/model1.yaml",
-        "model2": "configs/model/model2.yaml", 
+        "model2": "configs/model/model2.yaml",
         "model3": "configs/model/model3.yaml"
     }
     
-    trained_model_paths = {}
-    
     for model_name, config_path in model_configs.items():
-        print(f"\n{'='*60}")
+        print(f"\n{'='*50}")
         print(f"TRAINING {model_name}")
-        print(f"{'='*60}")
+        print(f"{'='*50}")
         
-        # Load model-specific config
-        from omegaconf import OmegaConf
-        model_specific_config = OmegaConf.load(config_path)
-        
-        # Update cfg with current model config
-        cfg.model = model_specific_config
+        # Load model config
+        model_cfg = OmegaConf.load(config_path)
+        cfg.model = model_cfg
         cfg.model_name = model_name
         
-        # Train the model
+        # Train
         train_model(cfg)
         
-        # Get the best checkpoint path
-        checkpoint_path = Path(cfg.data.output_dir) / "models" / model_name / "best-fold0.ckpt"
-        if not checkpoint_path.exists():
-            # Try alternative naming (Hydra might use different fold naming)
-            checkpoint_path = list(Path(cfg.data.output_dir).glob(f"models/{model_name}/best-fold*.ckpt"))[0]
-        
-        trained_model_paths[model_name] = str(checkpoint_path)
-        print(f"✅ {model_name} trained. Checkpoint: {checkpoint_path}")
-        
         # Convert to ONNX
-        onnx_path = Path(cfg.data.output_dir) / "models" / model_name / f"{model_name}.onnx"
-        success = convert_to_onnx(str(checkpoint_path), str(onnx_path), model_specific_config)
-        
-        if success:
-            print(f"✅ {model_name} converted to ONNX: {onnx_path}")
-        else:
-            print(f"⚠️  {model_name} ONNX conversion failed, continuing...")
+        checkpoint_path = Path(cfg.data.output_dir) / "outputs" / "models" / model_name / "best-fold0.ckpt"
+        onnx_path = Path(cfg.data.output_dir) / "outputs" / "models" / f"{model_name}.onnx"
+        convert_to_onnx(str(checkpoint_path), str(onnx_path), model_cfg)
     
-    print(f"\n{'='*60}")
-    print("ALL MODELS TRAINED AND CONVERTED TO ONNX")
-    print(f"{'='*60}")
-    
-    # Return paths for ensemble (if needed later)
-    return trained_model_paths
+    # Run ensemble
+    ensemble_predict(cfg)
