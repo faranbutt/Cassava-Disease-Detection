@@ -1,0 +1,29 @@
+# pyproject.toml
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cassava-classifier"
+version = "0.1.0"
+description = "Cassava Leaf Disease Classification"
+dependencies = [
+    "torch",
+    "torchvision",
+    "timm",
+    "pytorch-lightning",
+    "pandas",
+    "scikit-learn",
+    "opencv-python-headless",
+    "albumentations",
+    "hydra-core",
+    "omegaconf",
+    "numpy",
+    "wrapt>=2.0.1",
+]
+
+[tool.setuptools]
+packages = ["cassava_classifier"]
+
+[tool.setuptools.package-dir]
+cassava_classifier = "src/cassava_classifier"

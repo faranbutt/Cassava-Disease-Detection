@@ -1,0 +1,9 @@
+defaults:
+  - model: model1
+  - train: train
+  - data: data
+  - _self_
+
+model_name: "model1"
+debug: true     
+debug_samples: 100 
