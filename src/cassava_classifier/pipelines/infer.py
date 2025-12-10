@@ -15,10 +15,16 @@ from ..models.model import CassavaLightningModule
 from ..utils.preprocessing import clean_labels
 import mlflow
 
-def load_checkpoint(model_path: str, model_config: DictConfig):
+torch.serialization.add_safe_globals([omegaconf.base.ContainerMetadata])
+torch.serialization.add_safe_globals([type(omegaconf.DictConfig({}))])
+
+def load_checkpoint(model_path: str, model_config):
     """Load trained model from checkpoint"""
     model = CassavaLightningModule.load_from_checkpoint(
-        model_path, model_config=model_config, weights_only=False
+        model_path,
+        model_config=model_config,
+        map_location="cpu",
+        weights_only=False  # ⚠️ Required to load non-weight data (e.g., OmegaConf)
     )
     model.eval()
     return model
@@ -93,11 +99,11 @@ def ensemble_predict(cfg: DictConfig):
     
     model_paths = []
     for model_dir in model_dirs:
-        checkpoints = glob.glob(f"{model_dir}/best-foldfold=0*.ckpt")
+        checkpoints = glob.glob(f"{model_dir}/best-fold_*.ckpt")
         if not checkpoints:
-            raise FileNotFoundError(f"No checkpoints found in {model_dir}")
-        latest_checkpoint = max(checkpoints, key=os.path.getctime)
-        model_paths.append(latest_checkpoint)
+            raise FileNotFoundError(f"No checkpoints in {model_dir}")
+        latest = max(checkpoints, key=os.path.getctime)
+        model_paths.append(latest)
 
     configs = [
         OmegaConf.load("configs/model/model1.yaml"),
@@ -107,12 +113,11 @@ def ensemble_predict(cfg: DictConfig):
 
     models = []
     for path, model_cfg in zip(model_paths, configs):
-        model = CassavaLightningModule.load_from_checkpoint(
-            str(path), model_config=model_cfg
-        )
+        model = load_checkpoint(path, model_cfg)  # ← Use fixed function
+        model.to(device)
         model.eval()
         models.append(model)
-
+        
     # Run ensemble
     all_preds = []
     all_targets = []
