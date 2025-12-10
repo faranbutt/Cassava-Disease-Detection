@@ -19,6 +19,7 @@ repos:
     hooks:
       - id: isort
         args: ["--profile", "black"]
+        additional_dependencies: [wrapt]
 
   - repo: https://github.com/pycqa/flake8
     rev: 7.1.0

@@ -1,4 +1,4 @@
-# src/cassava_classifier/commands.py
+# working/Cassava-Disease-Detection/src/cassava_classifier/commands.py
 import os
 import sys
 

@@ -1,147 +1,127 @@
-# src/cassava_classifier/pipelines/infer.py
+# src/cassava_classifier/pipelines/train.py
 import glob
 import os
+import sys
 from pathlib import Path
 
-import cv2
 import pandas as pd
-import torch
-import torch.nn.functional as F
-from albumentations import Compose, Normalize, Resize
-from albumentations.pytorch import ToTensorV2
+import pytorch_lightning as pl
 from omegaconf import DictConfig, OmegaConf
-from sklearn.metrics import accuracy_score, f1_score
+from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import (
+    EarlyStopping,
+    LearningRateMonitor,
+    ModelCheckpoint,
+)
 from sklearn.model_selection import StratifiedKFold
 
-from ..data.datamodule import CassavaDataModule
-from ..models.model import CassavaLightningModule
-from ..utils.preprocessing import clean_labels
+from cassava_classifier.data.datamodule import CassavaDataModule
+from cassava_classifier.models.model import CassavaLightningModule
+from cassava_classifier.pipelines.convert import convert_to_onnx
+from cassava_classifier.pipelines.infer import ensemble_predict
+from cassava_classifier.utils.preprocessing import clean_labels
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def train_fold(fold: int, train_df, val_df, model_config: DictConfig, cfg: DictConfig):
+    data_module = CassavaDataModule(
+        train_df,
+        val_df,
+        model_config=model_config,
+        dataroot=cfg.data.dataroot,
+        batch_size=cfg.train.batch_size,
+        num_workers=cfg.train.num_workers,
+    )
+
+    model = CassavaLightningModule(model_config=model_config, lr=cfg.train.lr)
+
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=Path(cfg.data.output_dir) / "models" / cfg.model_name,
+        filename="best-fold{fold}",
+        monitor="val_loss",
+        mode="min",
+        save_top_k=1,
+    )
+
+    trainer = Trainer(
+        max_epochs=cfg.train.epochs,
+        accelerator="auto",
+        devices=1,
+        precision=cfg.train.precision,
+        callbacks=[
+            checkpoint_callback,
+            EarlyStopping(monitor="val_loss", patience=cfg.train.patience),
+            LearningRateMonitor(),
+        ],
+        log_every_n_steps=cfg.train.log_every_n_steps,
+        enable_progress_bar=True,
+    )
+
+    trainer.fit(model, data_module)
+    return checkpoint_callback.best_model_path
+
+
+def train_model(cfg: DictConfig):
+    # cfg.model is already the correct model config (model1, model2, or model3)
+    model_config = cfg.model
+
+    # Set seeds for reproducibility
+    pl.seed_everything(cfg.train.seed, workers=True)
+
+    # Load and clean data
+    train_csv = Path(cfg.data.dataroot) / "train.csv"
+    df = pd.read_csv(train_csv)
+    df = clean_labels(df, cfg.data.dataroot)
+
+    # Debug mode: use subset if enabled
+    if cfg.get("debug", False):
+        df = df.sample(n=cfg.debug_samples, random_state=cfg.train.seed).reset_index(
+            drop=True
+        )
+        print(f"⚠️ DEBUG MODE: Using {len(df)} samples")
+
+    # K-Fold Cross Validation
+    skf = StratifiedKFold(
+        n_splits=cfg.train.n_splits, shuffle=True, random_state=cfg.train.seed
+    )
+
+    for fold, (train_idx, val_idx) in enumerate(skf.split(df, df["label"]), 1):
+        train_df = df.iloc[train_idx].reset_index(drop=True)
+        val_df = df.iloc[val_idx].reset_index(drop=True)
+        best_path = train_fold(fold, train_df, val_df, model_config, cfg)
+        print(f"Fold {fold} best model: {best_path}")
 
 
 def get_latest_checkpoint(model_dir: str) -> str:
-    """Get the latest checkpoint file"""
     checkpoints = glob.glob(f"{model_dir}/best-foldfold=0*.ckpt")
     if not checkpoints:
         raise FileNotFoundError(f"No checkpoints found in {model_dir}")
     return max(checkpoints, key=os.path.getctime)
 
 
-def load_checkpoint(model_path: str, model_config: DictConfig):
-    """Load trained model from checkpoint"""
-    model = CassavaLightningModule.load_from_checkpoint(
-        model_path, model_config=model_config
-    )
-    model.eval()
-    return model
+def train_all_models_and_ensemble(cfg: DictConfig):
+    model_configs = {
+        "model1": "configs/model/model1.yaml",
+        "model2": "configs/model/model2.yaml",
+        "model3": "configs/model/model3.yaml",
+    }
 
+    for model_name, config_path in model_configs.items():
+        print(f"\n{'='*50}")
+        print(f"TRAINING {model_name}")
+        print(f"{'='*50}")
 
-def preprocess_image(image_path: str, img_size: int):
-    """Preprocess single image for inference"""
-    image = cv2.imread(str(image_path))
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    transform = Compose(
-        [
-            Resize(height=img_size, width=img_size),
-            Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-            ToTensorV2(),
-        ]
-    )
-    augmented = transform(image=image)
-    return augmented["image"].unsqueeze(0)
+        model_cfg = OmegaConf.load(config_path)
+        OmegaConf.update(cfg, "model", model_cfg, merge=False)
+        OmegaConf.update(cfg, "model_name", model_name, merge=False)
 
+        train_model(cfg)
 
-def predict_single_image(model, image_tensor, device="cpu"):
-    """Run prediction on single image"""
-    image_tensor = image_tensor.to(device)
-    with torch.no_grad():
-        logits = model(image_tensor)
-        probabilities = F.softmax(logits, dim=1)
-        predicted_class = torch.argmax(probabilities, dim=1)
-    return predicted_class.item(), probabilities.squeeze().cpu().numpy()
+        # Convert to ONNX using correct path
+        model_dir = Path(cfg.data.output_dir) / "models" / model_name
+        checkpoint_path = get_latest_checkpoint(str(model_dir))
+        onnx_path = model_dir / f"{model_name}.onnx"
+        convert_to_onnx(str(checkpoint_path), str(onnx_path), model_cfg)
 
-
-def ensemble_predict(cfg: DictConfig):
-    print(f"\n{'='*50}")
-    print("RUNNING ENSEMBLE PREDICTION")
-    print(f"{'='*50}")
-
-    # Load validation data
-    train_csv = Path(cfg.data.dataroot) / "train.csv"
-    df = pd.read_csv(train_csv)
-    df = clean_labels(df, cfg.data.dataroot)
-
-    # Use last fold's val split
-    skf = StratifiedKFold(
-        n_splits=cfg.train.n_splits, shuffle=True, random_state=cfg.train.seed
-    )
-    _, val_idx = list(skf.split(df, df["label"]))[-1]
-    val_df = df.iloc[val_idx].reset_index(drop=True)
-
-    # Create dataloader
-    data_module = CassavaDataModule(
-        val_df,
-        val_df,
-        model_config=cfg.model,
-        dataroot=cfg.data.dataroot,
-        batch_size=cfg.train.batch_size,
-        num_workers=cfg.train.num_workers,
-    )
-    data_module.setup()
-    val_loader = data_module.val_dataloader()
-
-    # Load all 3 models
-    model_dirs = [
-        Path(cfg.data.output_dir) / "models" / "model1",
-        Path(cfg.data.output_dir) / "models" / "model2",
-        Path(cfg.data.output_dir) / "models" / "model3",
-    ]
-    model_paths = [get_latest_checkpoint(str(d)) for d in model_dirs]
-
-    configs = [
-        OmegaConf.load("configs/model/model1.yaml"),
-        OmegaConf.load("configs/model/model2.yaml"),
-        OmegaConf.load("configs/model/model3.yaml"),
-    ]
-
-    models = []
-    for path, model_cfg in zip(model_paths, configs):
-        model = CassavaLightningModule.load_from_checkpoint(
-            str(path), model_config=model_cfg
-        )
-        model.eval()
-        models.append(model)
-
-    # Run ensemble
-    all_preds = []
-    all_targets = []
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    for batch in val_loader:
-        x, y = batch
-        x = x.to(device)
-        ensemble_probs = []
-
-        for model, model_cfg in zip(models, configs):
-            if x.shape[-1] != model_cfg.img_size:
-                x_resized = F.interpolate(
-                    x.float(), size=(model_cfg.img_size, model_cfg.img_size)
-                )
-            else:
-                x_resized = x.float()
-
-            with torch.no_grad():
-                probs = torch.softmax(model(x_resized), dim=1)
-                ensemble_probs.append(probs)
-
-        avg_probs = torch.stack(ensemble_probs).mean(0)
-        preds = torch.argmax(avg_probs, dim=1)
-        all_preds.extend(preds.cpu().numpy())
-        all_targets.extend(y.numpy())
-
-    # Metrics
-    acc = accuracy_score(all_targets, all_preds)
-    f1 = f1_score(all_targets, all_preds, average="weighted")
-    print("\nENSEMBLE RESULTS:")
-    print(f"Accuracy: {acc:.4f}")
-    print(f"F1-Score: {f1:.4f}")
-    print(f"{'='*50}")
+    ensemble_predict(cfg)
