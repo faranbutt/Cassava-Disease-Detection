@@ -4,7 +4,7 @@ from pathlib import Path
 import torch
 import torch.serialization
 from omegaconf import DictConfig
-
+import omegaconf
 from ..models.model import CassavaLightningModule
 
 
@@ -20,7 +20,7 @@ def convert_to_onnx(checkpoint_path: str, output_path: str, model_config: DictCo
         checkpoint_path,
         model_config=model_config,
         map_location="cpu",
-        weights_only=False,  # ← Explicitly allow full loading
+        weights_only=False  # ← Also add this for safety
     )
     model.eval()
 

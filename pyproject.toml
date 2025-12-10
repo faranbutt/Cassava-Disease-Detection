@@ -23,6 +23,8 @@ dependencies = [
     "onnx>=1.20.0",
     "onnxruntime>=1.23.2",
     "onnxscript>=0.5.6",
+    "mlflow>=3.7.0",
+    "matplotlib>=3.10.7",
 ]
 
 [tool.setuptools]
@@ -30,6 +32,9 @@ packages = ["cassava_classifier"]
 
 [tool.setuptools.package-dir]
 cassava_classifier = "src/cassava_classifier"
+
+[tool.setuptools.package-data]
+cassava_classifier = ["../plots/*"]
 
 [dependency-groups]
 dev = [
