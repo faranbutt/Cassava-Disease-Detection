@@ -4,30 +4,28 @@ import torch.nn as nn
 from pathlib import Path
 from omegaconf import DictConfig
 from ..models.model import CassavaLightningModule
+import torch.serialization
 
 def convert_to_onnx(checkpoint_path: str, output_path: str, model_config: DictConfig):
     """
     Convert a trained PyTorch Lightning checkpoint to ONNX format.
-    
-    Args:
-        checkpoint_path: Path to the .ckpt file
-        output_path: Path where .onnx file will be saved
-        model_config: Hydra config for the model
     """
-    # Load model from checkpoint
+    # ✅ Fix: Allow OmegaConf in safe loading
+    torch.serialization.add_safe_globals([type(model_config)])
+    
+    # Load model from checkpoint (weights_only=False for compatibility)
     model = CassavaLightningModule.load_from_checkpoint(
         checkpoint_path,
         model_config=model_config,
-        map_location='cpu'  # Ensure CPU loading for portability
+        map_location='cpu',
+        weights_only=False  # ← Explicitly allow full loading
     )
     model.eval()
     
     # Handle image division models (448px -> 4x224px)
     if model_config.get('divide_image', False):
-        # For divided models, we need to handle the full 448px input
         dummy_input = torch.randn(1, 3, model_config.img_size, model_config.img_size)
     else:
-        # Standard models use direct input size
         dummy_input = torch.randn(1, 3, model_config.img_size, model_config.img_size)
     
     # Create output directory if it doesn't exist

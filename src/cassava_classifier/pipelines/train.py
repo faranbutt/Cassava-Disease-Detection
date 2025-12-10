@@ -1,6 +1,7 @@
 # src/cassava_classifier/pipelines/train.py
 import sys
 import os
+import glob
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 import pandas as pd
@@ -9,7 +10,7 @@ from sklearn.model_selection import StratifiedKFold
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
-from omegaconf import DictConfig, OmegaConf  # ← Add OmegaConf
+from omegaconf import DictConfig, OmegaConf 
 
 # Absolute imports
 from cassava_classifier.data.datamodule import CassavaDataModule
@@ -87,6 +88,12 @@ def train_model(cfg: DictConfig):
         print(f"Fold {fold} best model: {best_path}")
 
 
+def get_latest_checkpoint(model_dir: str) -> str:
+    checkpoints = glob.glob(f"{model_dir}/best-foldfold=0*.ckpt")
+    if not checkpoints:
+        raise FileNotFoundError(f"No checkpoints found in {model_dir}")
+    return max(checkpoints, key=os.path.getctime)
+
 def train_all_models_and_ensemble(cfg: DictConfig):
     model_configs = {
         "model1": "configs/model/model1.yaml",
@@ -99,18 +106,16 @@ def train_all_models_and_ensemble(cfg: DictConfig):
         print(f"TRAINING {model_name}")
         print(f"{'='*50}")
         
-        # Load model config
         model_cfg = OmegaConf.load(config_path)
-        cfg.model = model_cfg
-        cfg.model_name = model_name
+        OmegaConf.update(cfg, "model", model_cfg, merge=False)
+        OmegaConf.update(cfg, "model_name", model_name, merge=False)
         
-        # Train
         train_model(cfg)
         
-        # Convert to ONNX
-        checkpoint_path = Path(cfg.data.output_dir) / "outputs" / "models" / model_name / "best-fold0.ckpt"
-        onnx_path = Path(cfg.data.output_dir) / "outputs" / "models" / f"{model_name}.onnx"
+        # Convert to ONNX using correct path
+        model_dir = Path(cfg.data.output_dir) / "models" / model_name
+        checkpoint_path = get_latest_checkpoint(str(model_dir))
+        onnx_path = model_dir / f"{model_name}.onnx"
         convert_to_onnx(str(checkpoint_path), str(onnx_path), model_cfg)
     
-    # Run ensemble
     ensemble_predict(cfg)

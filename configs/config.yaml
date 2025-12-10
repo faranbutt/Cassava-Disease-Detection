@@ -1,11 +1,10 @@
-# configs/config.yaml
 defaults:
   - model: model1
   - train: train
-  - data: data
+  - data: data    # ← Fixed!
   - _self_
 
-# For full pipeline, we'll override model via CLI
-run_full: false  # ← keep false; we trigger via CLI
-debug: true      # ← keep true for fast test
+model_name: "model1"
+debug: true       # ← Set to true for testing
 debug_samples: 100
+run_full: false
