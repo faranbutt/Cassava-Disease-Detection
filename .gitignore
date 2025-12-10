@@ -10,3 +10,5 @@ wheels/
 .venv
 .virtual_documents
 cassava_classifier.egg-info
+outputs
+lightning_logs
