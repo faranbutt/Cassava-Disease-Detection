@@ -12,3 +12,6 @@ wheels/
 cassava_classifier.egg-info
 outputs
 lightning_logs
+models
+.dvc/cache/
+.dvc/tmp/

@@ -1,16 +1,16 @@
+from pathlib import Path
+
 import cv2
 import torch
-from pathlib import Path
 from torch.utils.data import Dataset
-from albumentations import Compose, RandomResizedCrop, Resize, Transpose, HorizontalFlip, VerticalFlip, ShiftScaleRotate, Normalize
-from albumentations.pytorch import ToTensorV2
+
 
 class CassavaDataset(Dataset):
     def __init__(self, df, data_path, transform=None, divide_image=False, img_size=384):
         self.df = df
         self.data_path = Path(data_path)
-        self.img_ids = df['image_id'].values
-        self.labels = df['label'].values if 'label' in df.columns else None
+        self.img_ids = df["image_id"].values
+        self.labels = df["label"].values if "label" in df.columns else None
         self.transform = transform
         self.divide_image = divide_image
         self.img_size = img_size
@@ -20,13 +20,13 @@ class CassavaDataset(Dataset):
 
     def __getitem__(self, idx):
         img_id = self.img_ids[idx]
-        img_path = self.data_path / 'train_images' / img_id
+        img_path = self.data_path / "train_images" / img_id
         image = cv2.imread(str(img_path))
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         if self.transform:
             augmented = self.transform(image=image)
-            image = augmented['image']
+            image = augmented["image"]
 
         if self.labels is not None:
             label = torch.tensor(self.labels[idx], dtype=torch.long)

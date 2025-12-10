@@ -1,9 +1,9 @@
-batch_size: 32          
+batch_size: 32
 epochs: 1
 lr: 1e-4
 precision: "16-mixed"
-num_workers: 2        
+num_workers: 2
 seed: 1006
-n_splits: 5           
-patience: 5            
-log_every_n_steps: 10 
+n_splits: 5
+patience: 5
+log_every_n_steps: 10

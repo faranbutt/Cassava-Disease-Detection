@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class MultiDropoutLinear(nn.Module):
     def __init__(self, in_features, out_features, n_drops=5, dropout_rate=0.5):
         super().__init__()
@@ -16,27 +17,29 @@ class MultiDropoutLinear(nn.Module):
         else:
             return self.fc(x)
 
+
 class AttentionWeighting(nn.Module):
-    def __init__(self, n_features, pattern='A'):
+    def __init__(self, n_features, pattern="A"):
         super().__init__()
         self.pattern = pattern
-        if pattern == 'A':
+        if pattern == "A":
             self.att_layer = nn.Linear(n_features, 1)
-        elif pattern == 'B':
+        elif pattern == "B":
             self.att_layer = nn.Sequential(
-                nn.Linear(n_features, 256),
-                nn.Tanh(),
-                nn.Linear(256, 1)
+                nn.Linear(n_features, 256), nn.Tanh(), nn.Linear(256, 1)
             )
         else:
             raise ValueError(f"Invalid attention pattern: {pattern}")
 
     def forward(self, features_list):
         stacked = torch.stack(features_list, dim=0)
-        att_scores = torch.stack([self.att_layer(feat) for feat in features_list], dim=0)
+        att_scores = torch.stack(
+            [self.att_layer(feat) for feat in features_list], dim=0
+        )
         att_weights = F.softmax(att_scores, dim=0)
         weighted_features = (stacked * att_weights).sum(dim=0)
         return weighted_features
+
 
 class LabelSmoothingCrossEntropy(nn.Module):
     def __init__(self, epsilon=0.1, weight=None):
