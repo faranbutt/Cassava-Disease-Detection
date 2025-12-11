@@ -1,5 +1,5 @@
 batch_size: 32
-epochs: 1
+epochs: 10
 lr: 1e-4
 precision: "16-mixed"
 num_workers: 2
