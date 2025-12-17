@@ -41,3 +41,20 @@ uv pip install -e .
 # Install pre-commit hooks
 uv run pre-commit install
 ```
+
+
+Commands:
+```
+# run the app
+MPLBACKEND=Agg python src/cassava_classifier/commands.py ++run_full=true debug=true
+
+# run mlflow
+mlflow ui \
+  --backend-store-uri sqlite:///mlflow.db \
+  --default-artifact-root ./mlartifacts \
+  --host 0.0.0.0 \
+  --port 8080 \
+  --allowed-hosts "https://36456e7dbb04.ngrok-free.app,127.0.0.1,localhost"
+
+
+```
