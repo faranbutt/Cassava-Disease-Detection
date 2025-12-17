@@ -18,3 +18,8 @@ models
 credentials.json
 /data
 data
+
+models/
+*.ckpt
+*.onnx
+*.engine

@@ -58,6 +58,10 @@ def predict_single_image(model, image_tensor, device="cpu"):
     return predicted_class.item(), probabilities.squeeze().cpu().numpy()
 
 def ensemble_predict(cfg: DictConfig):
+    """
+    Ensemble is used for evaluation only.
+    It is NOT used for production inference or deployment.
+    """
     print(f"\n{'='*50}")
     print("RUNNING ENSEMBLE PREDICTION")
     print(f"{'='*50}")
@@ -100,11 +104,10 @@ def ensemble_predict(cfg: DictConfig):
     
     model_paths = []
     for model_dir in model_dirs:
-        checkpoints = glob.glob(f"{model_dir}/best-fold_*.ckpt")
-        if not checkpoints:
-            raise FileNotFoundError(f"No checkpoints in {model_dir}")
-        latest = max(checkpoints, key=os.path.getctime)
-        model_paths.append(latest)
+        checkpoint = model_dir / "model_best.ckpt"
+        if not checkpoint.exists():
+            raise FileNotFoundError(f"Missing model_best.ckpt in {model_dir}")
+        model_paths.append(str(checkpoint))
 
     configs = [
         OmegaConf.load("configs/model/model1.yaml"),

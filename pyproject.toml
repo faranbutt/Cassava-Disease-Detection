@@ -25,6 +25,8 @@ dependencies = [
     "onnxscript>=0.5.6",
     "mlflow>=3.7.0",
     "matplotlib>=3.10.7",
+    "dvc>=3.64.2",
+    "dvc-gdrive>=3.0.1",
 ]
 
 [tool.setuptools]

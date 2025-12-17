@@ -25,11 +25,28 @@ from cassava_classifier.models.model import CassavaLightningModule
 from cassava_classifier.pipelines.convert import convert_to_onnx
 from cassava_classifier.pipelines.infer import ensemble_predict
 from cassava_classifier.utils.preprocessing import clean_labels
-
+from pytorch_lightning.callbacks import Callback
 # Ensure repo root is on path (optional, safe)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 torch.serialization.add_safe_globals([typing.Any])
+
+class MetricsHistory(Callback):
+    def __init__(self):
+        super().__init__()
+        self.train_loss = []
+        self.val_loss = []
+        self.train_acc = []
+        self.val_acc = []
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        # Record metrics at the end of each epoch
+        metrics = trainer.callback_metrics
+        self.train_loss.append(metrics.get("train_loss_epoch", torch.tensor(0.0)).item())
+        self.val_loss.append(metrics.get("val_loss", torch.tensor(0.0)).item())
+        self.train_acc.append(metrics.get("train_acc_epoch", torch.tensor(0.0)).item())
+        self.val_acc.append(metrics.get("val_acc", torch.tensor(0.0)).item())
+
 
 def train_fold(fold: int, train_df, val_df, model_config: DictConfig, cfg: DictConfig):
     """Train a single fold, log to MLflow, save checkpoint, and register model."""
@@ -92,23 +109,28 @@ def train_fold(fold: int, train_df, val_df, model_config: DictConfig, cfg: DictC
         checkpoint_dir = Path(cfg.data.output_dir) / "models" / cfg.model_name
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        checkpoint_callback = ModelCheckpoint(
-            dirpath=checkpoint_dir,
-            filename=f"best-fold_{fold}",
-            monitor="val_loss",
-            mode="min",
-            save_top_k=1,
-        )
-
+        checkpoint_callback = None
+        if fold == 1:
+            checkpoint_callback = ModelCheckpoint(
+                dirpath=checkpoint_dir,
+                filename="model_best",
+                monitor="val_loss",
+                mode="min",
+                save_top_k=1,
+            )
+        history_cb = MetricsHistory()
         trainer = Trainer(
             max_epochs=cfg.train.epochs,
             accelerator="auto",
             devices=1,
             precision=cfg.train.precision,
             callbacks=[
-                checkpoint_callback,
-                EarlyStopping(monitor="val_loss", patience=cfg.train.patience),
-                LearningRateMonitor(),
+                cb for cb in [
+                    checkpoint_callback,
+                    EarlyStopping(monitor="val_loss", patience=cfg.train.patience),
+                    LearningRateMonitor(),
+                    history_cb
+                ] if cb is not None
             ],
             log_every_n_steps=cfg.train.log_every_n_steps,
             enable_progress_bar=True,
@@ -119,12 +141,12 @@ def train_fold(fold: int, train_df, val_df, model_config: DictConfig, cfg: DictC
         trainer.fit(model, data_module)
 
         # Trainer may not have saved a checkpoint if no improvement; get best path carefully
-        best_ckpt_path = checkpoint_callback.best_model_path
-        if not best_ckpt_path:
-            # Fall back to newest checkpoint file in the directory
-            ckpts = glob.glob(str(checkpoint_dir / "best-fold_*.ckpt"))
+        if checkpoint_callback is not None and checkpoint_callback.best_model_path:
+            best_ckpt_path = checkpoint_callback.best_model_path
+        else:
+    # Fall back to newest checkpoint file in the directory
+            ckpts = glob.glob(str(checkpoint_dir / "*.ckpt"))
             best_ckpt_path = max(ckpts, key=os.path.getctime) if ckpts else ""
-
         # Log metrics (best-effort)
         val_metrics = trainer.callback_metrics or {}
         train_metrics = trainer.logged_metrics or {}
@@ -140,7 +162,7 @@ def train_fold(fold: int, train_df, val_df, model_config: DictConfig, cfg: DictC
         plot_dir.mkdir(parents=True, exist_ok=True)
         plot_path = plot_dir / f"metrics_fold_{fold}_{cfg.model_name}.png"
         try:
-            create_metrics_plot(trainer, str(plot_path))
+            create_metrics_plot(history_cb, str(plot_path))
             mlflow.log_artifact(str(plot_path), artifact_path="plots")
         except Exception as e:
             print(f"Warning: couldn't create/log metrics plot: {e}")
@@ -182,56 +204,43 @@ def train_fold(fold: int, train_df, val_df, model_config: DictConfig, cfg: DictC
         return best_ckpt_path
 
 
-def create_metrics_plot(trainer, plot_path):
-    """Create training/validation metrics plot"""
-    try:
-        # Get all logged metrics from trainer
-        # We'll manually track them since trainer.logged_metrics only has last value
-        # Instead, we'll use the fact that we can access the logger's history if available
-        # For simplicity, let's extract from trainer's callback_metrics (which may be empty)
-        # Better approach: Track metrics during training via a custom callback
-        
-        # For now, fallback to using the single value we have
-        metrics = trainer.logged_metrics or {}
-        
-        # Create plot
-        fig, ax = plt.subplots(2, 2, figsize=(12, 10))
-        
-        # Training Loss (epoch)
-        train_loss_epoch = metrics.get("train_loss_epoch", 0.0)
-        ax[0,0].plot([1], [train_loss_epoch], 'b-', label='Train Loss')
-        ax[0,0].set_title('Training Loss')
-        ax[0,0].legend()
-        
-        # Validation Loss
-        val_loss = metrics.get("val_loss", 0.0)
-        ax[0,1].plot([1], [val_loss], 'r-', label='Val Loss')
-        ax[0,1].set_title('Validation Loss')
-        ax[0,1].legend()
-        
-        # Training Accuracy (epoch)
-        train_acc_epoch = metrics.get("train_acc_epoch", 0.0)
-        ax[1,0].plot([1], [train_acc_epoch], 'b-', label='Train Acc')
-        ax[1,0].set_title('Training Accuracy')
-        ax[1,0].legend()
-        
-        # Validation Accuracy
-        val_acc = metrics.get("val_acc", 0.0)
-        ax[1,1].plot([1], [val_acc], 'r-', label='Val Acc')
-        ax[1,1].set_title('Validation Accuracy')
-        ax[1,1].legend()
-        
-        # Set fixed axis limits for visibility
-        ax[0,0].set_ylim(0, 3)  # Adjust based on your loss range
-        ax[0,1].set_ylim(0, 3)
-        ax[1,0].set_ylim(0, 1)
-        ax[1,1].set_ylim(0, 1)
-        
-        plt.tight_layout()
-        plt.savefig(plot_path)
-        plt.close()
-    except Exception as e:
-        print(f"Warning: Could not create plot: {e}")
+def create_metrics_plot(history_cb, plot_path):
+    """Create training/validation metrics plot from MetricsHistory callback"""
+    fig, ax = plt.subplots(2, 2, figsize=(12, 10))
+
+    epochs = list(range(1, len(history_cb.train_loss) + 1))
+
+    # Training Loss
+    ax[0,0].plot(epochs, history_cb.train_loss, 'b-', label='Train Loss')
+    ax[0,0].set_title('Training Loss')
+    ax[0,0].set_xlabel('Epoch')
+    ax[0,0].set_ylabel('Loss')
+    ax[0,0].legend()
+
+    # Validation Loss
+    ax[0,1].plot(epochs, history_cb.val_loss, 'r-', label='Val Loss')
+    ax[0,1].set_title('Validation Loss')
+    ax[0,1].set_xlabel('Epoch')
+    ax[0,1].set_ylabel('Loss')
+    ax[0,1].legend()
+
+    # Training Accuracy
+    ax[1,0].plot(epochs, history_cb.train_acc, 'b-', label='Train Acc')
+    ax[1,0].set_title('Training Accuracy')
+    ax[1,0].set_xlabel('Epoch')
+    ax[1,0].set_ylabel('Accuracy')
+    ax[1,0].legend()
+
+    # Validation Accuracy
+    ax[1,1].plot(epochs, history_cb.val_acc, 'r-', label='Val Acc')
+    ax[1,1].set_title('Validation Accuracy')
+    ax[1,1].set_xlabel('Epoch')
+    ax[1,1].set_ylabel('Accuracy')
+    ax[1,1].legend()
+
+    plt.tight_layout()
+    plt.savefig(plot_path)
+    plt.close()
 
 
 def train_model(cfg: DictConfig):
@@ -259,12 +268,11 @@ def train_model(cfg: DictConfig):
         print(f"Fold {fold} best model: {best_path}")
 
 
-def get_latest_checkpoint(model_dir: str) -> str:
-    """Return newest best-fold_*.ckpt in model_dir."""
-    checkpoints = glob.glob(os.path.join(model_dir, "best-fold_*.ckpt"))
-    if not checkpoints:
-        raise FileNotFoundError(f"No checkpoints found in {model_dir}")
-    return max(checkpoints, key=os.path.getctime)
+def get_best_checkpoint(model_dir: Path) -> Path:
+    checkpoint = model_dir / "model_best.ckpt"
+    if not checkpoint.exists():
+        raise FileNotFoundError(f"Best checkpoint not found: {checkpoint}")
+    return checkpoint
 
 
 def train_all_models_and_ensemble(cfg: DictConfig):
@@ -290,8 +298,8 @@ def train_all_models_and_ensemble(cfg: DictConfig):
         if not cfg.get("debug", False):
             model_dir = Path(cfg.data.output_dir) / "models" / model_name
             try:
-                checkpoint_path = get_latest_checkpoint(str(model_dir))
-                onnx_path = model_dir / f"{model_name}.onnx"
+                checkpoint_path = get_best_checkpoint(model_dir)
+                onnx_path = model_dir / "model.onnx"
                 convert_to_onnx(str(checkpoint_path), str(onnx_path), model_cfg)
             except Exception as e:
                 print(f"Warning: ONNX conversion skipped/failed for {model_name}: {e}")
