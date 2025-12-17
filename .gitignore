@@ -15,3 +15,6 @@ lightning_logs
 models
 .dvc/cache/
 .dvc/tmp/
+credentials.json
+/data
+data
