@@ -11,6 +11,10 @@ debug: true       # ← Set to true for testing
 debug_samples: 100
 run_full: false
 
+artifacts:
+  save_ckpt: false      # default: no
+  save_onnx: true       # always yes
+
 predict:
   model_path: "models/model1/model_best.ckpt"
   image_path: "data/example.jpg"

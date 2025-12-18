@@ -5,3 +5,4 @@ use_multidrop: false
 use_attention: false
 label_smoothing: 0.0
 divide_image: false
+pretrained: true

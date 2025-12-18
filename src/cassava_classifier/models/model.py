@@ -20,7 +20,8 @@ class CassavaLightningModule(pl.LightningModule):
         self.model_config = model_config
         self.lr = lr
 
-        base_model = create_model(model_config["name"], pretrained=True)
+        pretrained = model_config.get("pretrained", True)
+        base_model = create_model(model_config["name"], pretrained=pretrained)
         n_features = base_model.head.in_features
         base_model.head = nn.Identity()
         self.backbone = base_model
